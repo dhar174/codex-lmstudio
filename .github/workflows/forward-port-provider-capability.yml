@@ -108,7 +108,7 @@ jobs:
         with:
           tool: nextest
           version: 0.9.103
-      
+
       - name: Regenerate configuration schema
         working-directory: codex-rs
         shell: bash
@@ -118,17 +118,17 @@ jobs:
         working-directory: codex-rs
         shell: bash
         run: just test -p codex-model-provider-info
-      
+
       - name: Test model-provider
         working-directory: codex-rs
         shell: bash
         run: just test -p codex-model-provider
-      
+
       - name: Test config
         working-directory: codex-rs
         shell: bash
         run: just test -p codex-config
-      
+
       - name: Check dependent crates
         working-directory: codex-rs
         shell: bash
