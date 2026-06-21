@@ -32,13 +32,49 @@ If equivalent support is not already present upstream, the fork will add a provi
 
 Devstral's default Jinja template can reject adjacent user messages or converted developer/system messages. This is separate from MCP namespace handling. The repository will document a tested LM Studio template override, but the Rust compatibility patch will not attempt to solve prompt-template behavior.
 
+## Upstream PR #28271 integration decision
+
+OpenAI Codex PR #28271 (`kotakem/issue-26234-flatten-mcp-tools`) already implements the same provider-specific namespace-tool compatibility direction planned here.
+
+Repository references:
+
+- Vendor branch: `vendor/openai-pr-28271`
+- Imported head: `0b7b2436bb2b6b4f5eeca64ab72a9ee8cee5844d`
+- Draft comparison PR: `#1`
+
+The exact upstream PR head is preserved as a vendor reference, but it will not become this fork's long-lived base. The vendor branch is five commits ahead of its merge base and substantially behind the fork's current `main`; GitHub reports that it does not merge cleanly into `codex/lmstudio-automation`.
+
+The implementation strategy is therefore:
+
+1. Keep the vendor branch unchanged for provenance and future upstream comparisons.
+2. Forward-port the PR's behavior onto current `main` using current Codex abstractions.
+3. Reuse upstream test cases and semantics where they remain valid.
+4. Add fixes for unresolved review findings before publishing a build.
+5. Retire the forward-port automatically when equivalent code lands upstream.
+
+Unresolved upstream review findings that must be addressed:
+
+- reject or disambiguate canonical flat-name collisions before exposing flattened MCP functions
+- resolve flat calls to one unambiguous runtime instead of first-match hash-map lookup
+- preserve canonical runtime names for pre/post tool hooks, especially `spawn_agent`/`Agent`
+- keep standalone web and image tools available for Responses Lite providers that disable namespace wrappers
+- preserve Responses API name-length limits for flattened dynamic tools
+
+Current-main observations:
+
+- `ProviderCapabilities` already includes `namespace_tools`, but current configured providers do not yet resolve it from `ModelProviderInfo`.
+- `ModelProviderInfo` does not yet expose a `namespace_tools` configuration field.
+- `responses_api.rs` still serializes namespace tools without a flattening helper.
+- `ToolRegistry` still performs exact-name lookup only.
+- current MCP normalization already preserves raw identities and hashes model-visible namespace/tool collisions; the forward-port should build on that rather than duplicate it.
+
 ## Phase 1: Current-source discovery
 
-- [ ] Confirm the current code paths for provider capabilities and provider configuration.
-- [ ] Confirm the current Responses API tool serialization path.
-- [ ] Confirm MCP tool registration, model-visible naming, and call dispatch paths.
-- [ ] Search current upstream source, issues, and pull requests for equivalent compatibility work.
-- [ ] Document the minimal design, affected crates, tests, and patch-retirement conditions.
+- [x] Confirm the current code paths for provider capabilities and provider configuration.
+- [x] Confirm the current Responses API tool serialization path.
+- [x] Confirm MCP tool registration, model-visible naming, and call dispatch paths.
+- [x] Search current upstream source, issues, and pull requests for equivalent compatibility work.
+- [x] Document the minimal design, affected crates, tests, and patch-retirement conditions.
 - [ ] Confirm current build, formatting, schema-generation, and release conventions.
 
 ### Initial source findings
@@ -46,6 +82,10 @@ Devstral's default Jinja template can reject adjacent user messages or converted
 - MCP server connections and tool aggregation are owned by `codex-rs/codex-mcp/src/connection_manager.rs`.
 - Model-visible MCP namespace and tool-name normalization is owned by `codex-rs/codex-mcp/src/tools.rs`.
 - Current `ToolInfo` already preserves raw server/tool identity separately from model-visible `callable_namespace` and `callable_name`.
+- Provider capabilities are owned by `codex-rs/model-provider/src/provider.rs`.
+- User-configurable provider metadata is owned by `codex-rs/model-provider-info/src/lib.rs`.
+- Responses namespace serialization is owned by `codex-rs/tools/src/responses_api.rs`.
+- Runtime resolution and hook dispatch are owned by `codex-rs/core/src/tools/registry.rs`.
 - The implementation should extend existing abstractions rather than introduce a second parallel naming system.
 
 ## Phase 2: Provider-specific namespace compatibility
@@ -56,7 +96,9 @@ Devstral's default Jinja template can reject adjacent user messages or converted
 - [ ] Use deterministic, reversible names within provider limits.
 - [ ] Reject collisions, malformed names, and ambiguous mappings safely.
 - [ ] Reverse-map returned flat calls to the original MCP server and tool.
+- [ ] Preserve canonical runtime names for hooks and telemetry after reverse mapping.
 - [ ] Preserve arguments, call IDs, streaming events, parallel calls, and ordinary functions.
+- [ ] Preserve standalone Responses Lite web/image tools when namespaces are unavailable.
 - [ ] Preserve existing defaults and OpenAI-provider behavior.
 - [ ] Update the generated config schema when required.
 
@@ -65,12 +107,15 @@ Devstral's default Jinja template can reject adjacent user messages or converted
 - [ ] Namespace-capable provider retains namespace representation.
 - [ ] Namespace-incapable provider receives flattened ordinary functions.
 - [ ] Similar names from separate MCP servers remain distinct.
+- [ ] Canonical flat-name collisions fail safely or receive deterministic disambiguation.
 - [ ] Arguments and schemas remain unchanged.
 - [ ] Returned flat calls dispatch to the correct server/tool.
 - [ ] Invalid and ambiguous names fail safely.
+- [ ] Hook matching receives the canonical runtime name after flat resolution.
 - [ ] Streaming tool calls preserve names and call IDs.
 - [ ] Parallel tool calls continue to work.
 - [ ] Ordinary functions remain unchanged.
+- [ ] Responses Lite standalone web/image tools remain visible.
 - [ ] Default and OpenAI-provider behavior remains unchanged.
 
 ## Phase 3: Isolated installation tooling
@@ -120,6 +165,7 @@ Add GitHub Actions workflows for:
 
 - [ ] scheduled and manual upstream-change detection
 - [ ] safe synchronization with `openai/codex:main`
+- [ ] monitoring PR #28271 and equivalent upstream implementations
 - [ ] compatibility-patch verification and retirement detection
 - [ ] focused Rust tests and formatting checks
 - [ ] Linux x86_64 release builds
