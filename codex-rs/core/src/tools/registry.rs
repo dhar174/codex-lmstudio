@@ -321,11 +321,23 @@ impl CoreToolRuntime for ExposureOverride {
 
 pub struct ToolRegistry {
     tools: HashMap<ToolName, Arc<dyn CoreToolRuntime>>,
+    /// Secondary index from a tool's flat string name to its canonical
+    /// [`ToolName`].  Built once in [`ToolRegistry::from_tools`] for every
+    /// namespaced tool whose flat representation differs from its canonical
+    /// key.  Used as a fallback when a model that does not support namespace
+    /// tool types returns a plain function call whose name was formed by
+    /// concatenating the namespace prefix and the tool name.
+    flat_names: HashMap<String, ToolName>,
 }
 
 impl ToolRegistry {
     fn new(tools: HashMap<ToolName, Arc<dyn CoreToolRuntime>>) -> Self {
-        Self { tools }
+        let flat_names = tools
+            .keys()
+            .filter(|name| name.namespace.is_some())
+            .map(|name| (flat_tool_name(name).into_owned(), name.clone()))
+            .collect();
+        Self { tools, flat_names }
     }
 
     #[instrument(level = "trace", skip_all)]
@@ -344,7 +356,10 @@ impl ToolRegistry {
 
     #[cfg(test)]
     pub(crate) fn empty_for_test() -> Self {
-        Self::new(HashMap::new())
+        Self {
+            tools: HashMap::new(),
+            flat_names: HashMap::new(),
+        }
     }
 
     #[cfg(test)]
@@ -353,11 +368,28 @@ impl ToolRegistry {
         T: CoreToolRuntime + 'static,
     {
         let name = handler.tool_name();
-        Self::new(HashMap::from([(name, handler as Arc<dyn CoreToolRuntime>)]))
+        let tools = HashMap::from([(name, handler as Arc<dyn CoreToolRuntime>)]);
+        Self::new(tools)
     }
 
     fn tool(&self, name: &ToolName) -> Option<Arc<dyn CoreToolRuntime>> {
         self.tools.get(name).map(Arc::clone)
+    }
+
+    /// Resolves a [`ToolName`] to its registered canonical form.
+    ///
+    /// When a provider that does not support namespace tools returns a plain
+    /// function call (no namespace), the name may be a flat concatenation such
+    /// as `mcp__server__tool`.  This method checks the flat-name index so the
+    /// correct handler is found and `invocation.tool_name` can be normalised
+    /// to the canonical namespaced form before dispatch.
+    pub(crate) fn canonical_name<'a>(&'a self, name: &'a ToolName) -> &'a ToolName {
+        if name.namespace.is_none() {
+            if let Some(canonical) = self.flat_names.get(&name.name) {
+                return canonical;
+            }
+        }
+        name
     }
 
     #[cfg(test)]
@@ -369,23 +401,25 @@ impl ToolRegistry {
 
     #[cfg(test)]
     pub(crate) fn tool_exposure(&self, name: &ToolName) -> Option<ToolExposure> {
-        self.tools.get(name).map(|tool| tool.exposure())
+        self.tools
+            .get(self.canonical_name(name))
+            .map(|tool| tool.exposure())
     }
 
     pub(crate) fn create_diff_consumer(
         &self,
         name: &ToolName,
     ) -> Option<Box<dyn ToolArgumentDiffConsumer>> {
-        self.tool(name)?.create_diff_consumer()
+        self.tool(self.canonical_name(name))?.create_diff_consumer()
     }
 
     pub(crate) fn supports_parallel_tool_calls(&self, name: &ToolName) -> Option<bool> {
-        let tool = self.tool(name)?;
+        let tool = self.tool(self.canonical_name(name))?;
         Some(tool.supports_parallel_tool_calls())
     }
 
     pub(crate) fn waits_for_runtime_cancellation(&self, name: &ToolName) -> Option<bool> {
-        let tool = self.tool(name)?;
+        let tool = self.tool(self.canonical_name(name))?;
         Some(tool.waits_for_runtime_cancellation())
     }
 
@@ -407,6 +441,11 @@ impl ToolRegistry {
         mut invocation: ToolInvocation,
         terminal_outcome_reached: Option<Arc<AtomicBool>>,
     ) -> Result<AnyToolResult, FunctionCallError> {
+        // Canonicalise the tool name before dispatch so that downstream
+        // systems (hooks, telemetry, lifecycle) always see the registered
+        // namespaced form, even when the provider returned a flat alias.
+        invocation.tool_name = self.canonical_name(&invocation.tool_name).clone();
+
         let tool_name = invocation.tool_name.clone();
         let tool_name_flat = flat_tool_name(&tool_name);
         let call_id_owned = invocation.call_id.clone();

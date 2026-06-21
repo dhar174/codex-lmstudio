@@ -80,7 +80,7 @@ impl<'de> Deserialize<'de> for WireApi {
 }
 
 /// Serializable representation of a provider definition.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ModelProviderInfo {
     /// Friendly display name.
@@ -134,6 +134,42 @@ pub struct ModelProviderInfo {
     /// Whether this provider supports the Responses API WebSocket transport.
     #[serde(default)]
     pub supports_websockets: bool,
+    /// Whether this provider supports the `namespace` tool type in the Responses API.
+    /// When `false`, MCP namespace tools are flattened to individual function tools
+    /// before requests are sent to the model, enabling compatibility with providers
+    /// such as LM Studio that do not support namespace tool objects.
+    /// Defaults to `true`; most OpenAI-compatible providers pass namespace tools as-is.
+    #[serde(default = "default_namespace_tools")]
+    pub namespace_tools: bool,
+}
+
+fn default_namespace_tools() -> bool {
+    true
+}
+
+impl Default for ModelProviderInfo {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            base_url: Default::default(),
+            env_key: Default::default(),
+            env_key_instructions: Default::default(),
+            experimental_bearer_token: Default::default(),
+            auth: Default::default(),
+            aws: Default::default(),
+            wire_api: Default::default(),
+            query_params: Default::default(),
+            http_headers: Default::default(),
+            env_http_headers: Default::default(),
+            request_max_retries: Default::default(),
+            stream_max_retries: Default::default(),
+            stream_idle_timeout_ms: Default::default(),
+            websocket_connect_timeout_ms: Default::default(),
+            requires_openai_auth: false,
+            supports_websockets: false,
+            namespace_tools: true,
+        }
+    }
 }
 
 /// AWS SigV4 auth configuration for a model provider.
@@ -355,6 +391,7 @@ impl ModelProviderInfo {
             websocket_connect_timeout_ms: None,
             requires_openai_auth: true,
             supports_websockets: true,
+            namespace_tools: true,
         }
     }
 
@@ -385,6 +422,7 @@ impl ModelProviderInfo {
             websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            namespace_tools: true,
         }
     }
 
@@ -432,7 +470,7 @@ pub fn built_in_model_providers(
         ),
         (
             LMSTUDIO_OSS_PROVIDER_ID,
-            create_oss_provider(DEFAULT_LMSTUDIO_PORT, WireApi::Responses),
+            create_lmstudio_provider(DEFAULT_LMSTUDIO_PORT),
         ),
     ]
     .into_iter()
@@ -516,7 +554,20 @@ pub fn create_oss_provider_with_base_url(base_url: &str, wire_api: WireApi) -> M
         websocket_connect_timeout_ms: None,
         requires_openai_auth: false,
         supports_websockets: false,
+        namespace_tools: true,
     }
+}
+
+/// Creates the built-in LM Studio provider definition.
+///
+/// LM Studio does not support the `namespace` tool type in its Responses API
+/// implementation; it silently drops namespace tool objects. Setting
+/// `namespace_tools: false` causes Codex to flatten MCP namespace tools into
+/// individual function tools before sending requests to the model.
+pub fn create_lmstudio_provider(default_port: u16) -> ModelProviderInfo {
+    let mut provider = create_oss_provider(default_port, WireApi::Responses);
+    provider.namespace_tools = false;
+    provider
 }
 
 #[cfg(test)]

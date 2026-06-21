@@ -259,12 +259,14 @@ fn build_model_visible_specs_and_registry(
     specs.extend(hosted_specs);
 
     let registry = ToolRegistry::from_tools(runtimes);
-    let model_visible_specs = merge_into_namespaces(specs)
-        .into_iter()
-        .filter(|spec| {
-            namespace_tools_enabled(turn_context) || !matches!(spec, ToolSpec::Namespace(_))
-        })
-        .collect();
+    let model_visible_specs = if namespace_tools_enabled(turn_context) {
+        merge_into_namespaces(specs)
+    } else {
+        merge_into_namespaces(specs)
+            .into_iter()
+            .flat_map(flatten_namespace_to_functions)
+            .collect()
+    };
 
     (model_visible_specs, registry)
 }
@@ -577,6 +579,29 @@ fn merge_into_namespaces(specs: Vec<ToolSpec>) -> Vec<ToolSpec> {
     }
 
     merged_specs
+}
+
+/// Converts a single [`ToolSpec`] into one or more flat specs that are safe to
+/// send to a provider that does not support the `namespace` tool type.
+///
+/// - [`ToolSpec::Namespace`] is expanded: each inner function tool is emitted as
+///   a standalone [`ToolSpec::Function`] whose name is the namespace prefix
+///   concatenated with the original function name (e.g. `mcp__srv__` + `tool`
+///   → `mcp__srv__tool`).
+/// - All other spec variants pass through unchanged.
+fn flatten_namespace_to_functions(spec: ToolSpec) -> Vec<ToolSpec> {
+    match spec {
+        ToolSpec::Namespace(namespace) => namespace
+            .tools
+            .into_iter()
+            .map(|tool| {
+                let ResponsesApiNamespaceTool::Function(mut function) = tool;
+                function.name = format!("{}{}", namespace.name, function.name);
+                ToolSpec::Function(function)
+            })
+            .collect(),
+        other => vec![other],
+    }
 }
 
 fn code_mode_namespace_descriptions(
