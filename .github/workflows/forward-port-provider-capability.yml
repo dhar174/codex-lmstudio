@@ -105,17 +105,28 @@ jobs:
 
       - name: Regenerate configuration schema
         working-directory: codex-rs
+        shell: bash
         run: just write-config-schema
 
-      - name: Run scoped tests and compile checks
+      - name: Test model-provider-info
         working-directory: codex-rs
         shell: bash
-        run: |
-          set -euo pipefail
-          just test -p codex-model-provider-info
-          just test -p codex-model-provider
-          just test -p codex-config
-          cargo check -p codex-core -p codex-app-server
+        run: just test -p codex-model-provider-info
+      
+      - name: Test model-provider
+        working-directory: codex-rs
+        shell: bash
+        run: just test -p codex-model-provider
+      
+      - name: Test config
+        working-directory: codex-rs
+        shell: bash
+        run: just test -p codex-config
+      
+      - name: Check dependent crates
+        working-directory: codex-rs
+        shell: bash
+        run: cargo check -p codex-core -p codex-app-server
 
       - name: Apply scoped fixes and formatting
         working-directory: codex-rs
