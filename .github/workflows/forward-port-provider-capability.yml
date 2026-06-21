@@ -1,0 +1,136 @@
+name: Forward-port provider namespace capability
+
+on:
+  push:
+    branches:
+      - codex/lmstudio-automation
+    paths:
+      - .github/workflows/forward-port-provider-capability.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forward-port-provider-capability
+  cancel-in-progress: false
+
+jobs:
+  forward-port:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/lmstudio-automation
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch immutable vendor reference
+        run: git fetch origin vendor/openai-pr-28271:refs/remotes/origin/vendor/openai-pr-28271
+
+      - name: Apply provider-capability hunks from upstream PR 28271
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          merge_base="$(git merge-base HEAD origin/vendor/openai-pr-28271)"
+          git diff --binary "$merge_base" origin/vendor/openai-pr-28271 -- \
+            codex-rs/model-provider-info/src/lib.rs \
+            codex-rs/model-provider-info/src/model_provider_info_tests.rs \
+            codex-rs/model-provider/src/provider.rs \
+            codex-rs/model-provider/src/amazon_bedrock/mod.rs \
+            codex-rs/config/src/thread_config/proto/codex.thread_config.v1.proto \
+            codex-rs/config/src/thread_config/proto/codex.thread_config.v1.rs \
+            codex-rs/config/src/thread_config/remote.rs \
+            > /tmp/provider-capability.patch
+
+          test -s /tmp/provider-capability.patch
+          git apply --3way /tmp/provider-capability.patch
+
+      - name: Fill remaining explicit ModelProviderInfo literals
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          pattern = re.compile(
+              r"(?m)^(?P<indent>[ \t]*)supports_websockets:\s*(?:true|false),\n"
+              r"(?![ \t]*namespace_tools:)"
+          )
+
+          changed = []
+          for path in Path("codex-rs").rglob("*.rs"):
+              text = path.read_text(encoding="utf-8")
+              if "ModelProviderInfo" not in text:
+                  continue
+              updated, count = pattern.subn(
+                  lambda match: match.group(0)
+                  + f"{match.group('indent')}namespace_tools: None,\n",
+                  text,
+              )
+              if count:
+                  path.write_text(updated, encoding="utf-8")
+                  changed.append((str(path), count))
+
+          if not changed:
+              raise SystemExit("expected at least one remaining ModelProviderInfo literal")
+
+          print("Updated explicit ModelProviderInfo literals:")
+          for path, count in changed:
+              print(f"  {path}: {count}")
+          PY
+
+      - name: Install build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          command -v just >/dev/null 2>&1 || cargo install just --locked
+
+      - name: Regenerate configuration schema
+        working-directory: codex-rs
+        run: just write-config-schema
+
+      - name: Run scoped tests and compile checks
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          just test -p codex-model-provider-info
+          just test -p codex-model-provider
+          just test -p codex-config
+          cargo check -p codex-core -p codex-app-server
+
+      - name: Apply scoped fixes and formatting
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          just fix -p codex-model-provider-info
+          just fix -p codex-model-provider
+          just fix -p codex-config
+          just fmt
+
+      - name: Validate and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git status --short
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No provider capability changes were produced."
+            exit 1
+          fi
+          git commit -m "feat: add configurable namespace tool capability [skip ci]"
+          git push origin HEAD:codex/lmstudio-automation
