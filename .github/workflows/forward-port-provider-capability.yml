@@ -134,3 +134,5 @@ jobs:
           fi
           git commit -m "feat: add configurable namespace tool capability [skip ci]"
           git push origin HEAD:codex/lmstudio-automation
+
+# Manual retrigger after enabling GitHub Actions on the fork.
