@@ -83,7 +83,19 @@ jobs:
                   + f"{match.group('indent')}namespace_tools: None,\n",
                   text,
               )
-              if count:
+              duplicate_pattern = re.compile(r"(?m)^(?P<indent>[ \t]*)namespace_tools: None,\n"
+                  r"(?P<between>(?:(?P=indent)(?!namespace_tools:)[^\n]*\n){0,32})"
+                  r"(?P=indent)namespace_tools: (?P<explicit>Some\((?:true|false)\)),\n"
+              )
+              updated, duplicate_count = duplicate_pattern.subn(
+                  lambda match: (
+                      match.group("between")
+                      + f"{match.group('indent')}namespace_tools: "
+                      + f"{match.group('explicit')},\n"
+                  ),
+                  updated,
+              )
+              if count or duplicate_count:
                   path.write_text(updated, encoding="utf-8")
                   changed.append((str(path), count))
 
