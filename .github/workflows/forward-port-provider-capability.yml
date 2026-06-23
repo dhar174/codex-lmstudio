@@ -39,15 +39,15 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Fetch immutable vendor reference
-        run: git fetch origin vendor/openai-pr-28271:refs/remotes/origin/vendor/openai-pr-28271
+        run: git fetch origin vendor/openai-pr-29602:refs/remotes/origin/vendor/openai-pr-29602
 
-      - name: Apply provider-capability hunks from upstream PR 28271
+      - name: Apply provider-capability hunks from upstream PR 29602
         shell: bash
         run: |
           set -euo pipefail
 
-          merge_base="$(git merge-base HEAD origin/vendor/openai-pr-28271)"
-          git diff --binary "$merge_base" origin/vendor/openai-pr-28271 -- \
+          merge_base="$(git merge-base HEAD origin/vendor/openai-pr-29602)"
+          git diff --binary "$merge_base" origin/vendor/openai-pr-29602 -- \
             codex-rs/model-provider-info/src/lib.rs \
             codex-rs/model-provider-info/src/model_provider_info_tests.rs \
             codex-rs/model-provider/src/provider.rs \
