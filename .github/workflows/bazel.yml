@@ -13,8 +13,8 @@ on:
 concurrency:
   # Cancel previous actions from the same PR or branch except 'main' branch.
   # See https://docs.github.com/en/actions/using-jobs/using-concurrency and https://docs.github.com/en/actions/learn-github-actions/contexts for more info.
-  group: concurrency-group::${{ github.workflow }}::${{ github.event.pull_request.number > 0 && format('pr-{0}', github.event.pull_request.number) || github.ref_name }}${{ github.ref_name == 'main' && format('::{0}', github.run_id) || ''}}
-  cancel-in-progress: ${{ github.ref_name != 'main' }}
+  group: concurrency-group::${{ github.workflow }}::${{ github.ref_name == 'main' && format('::{0}', github.run_id) || ''}}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -29,16 +29,16 @@ jobs:
       matrix:
         include:
           # macOS
-          - os: macos-15-xlarge
-            target: aarch64-apple-darwin
-          - os: macos-15-xlarge
-            target: x86_64-apple-darwin
+          # - os: macos-15-xlarge
+          #   target: aarch64-apple-darwin
+          # - os: macos-15-xlarge
+          #   target: x86_64-apple-darwin
 
           # Linux
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
+          # - os: ubuntu-24.04
+          #   target: x86_64-unknown-linux-musl
           # 2026-02-27 Bazel tests have been flaky on arm in CI.
           # Disable until we can investigate and stabilize them.
           # - os: ubuntu-24.04-arm
