@@ -8,7 +8,7 @@ on:
       - .github/workflows/forward-port-provider-capability.yml
   pull_request:
     branches:
-      - main
+      - codex/lmstudio-automation
     paths:
       - .github/workflows/forward-port-provider-capability.yml
       - lmstudio-automation/PLAN.md
@@ -38,74 +38,85 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Fetch immutable vendor reference
-        run: git fetch origin vendor/openai-pr-29602:refs/remotes/origin/vendor/openai-pr-29602
-
-      - name: Apply provider-capability hunks from upstream PR 29602
+      - name: Fetch pinned upstream PR 29602
         shell: bash
         run: |
           set -euo pipefail
 
-          merge_base="$(git merge-base HEAD origin/vendor/openai-pr-29602)"
-          git diff --binary "$merge_base" origin/vendor/openai-pr-29602 -- \
-            codex-rs/model-provider-info/src/lib.rs \
-            codex-rs/model-provider-info/src/model_provider_info_tests.rs \
-            codex-rs/model-provider/src/provider.rs \
-            codex-rs/model-provider/src/amazon_bedrock/mod.rs \
-            codex-rs/config/src/thread_config/proto/codex.thread_config.v1.proto \
-            codex-rs/config/src/thread_config/proto/codex.thread_config.v1.rs \
-            codex-rs/config/src/thread_config/remote.rs \
-            > /tmp/provider-capability.patch
+          pr_ref="refs/remotes/upstream/pr-29602"
+          expected_sha="42961ed49bb490ff33f93e4ebbc091168af10173"
 
-          test -s /tmp/provider-capability.patch
-          git apply --3way /tmp/provider-capability.patch
+          git fetch --no-tags https://github.com/openai/codex.git \
+            "refs/pull/29602/head:${pr_ref}"
 
-      - name: Fill remaining explicit ModelProviderInfo literals
+          actual_sha="$(git rev-parse "${pr_ref}")"
+          if [[ "${actual_sha}" != "${expected_sha}" ]]; then
+            echo "PR 29602 changed since this workflow was reviewed." >&2
+            echo "Expected: ${expected_sha}" >&2
+            echo "Actual:   ${actual_sha}" >&2
+            exit 1
+          fi
+
+      - name: Apply upstream PR 29602
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
 
-          pattern = re.compile(
-              r"(?m)^(?P<indent>[ \t]*)supports_websockets:\s*(?:true|false),\n"
-              r"(?![ \t]*namespace_tools:)"
-          )
+          pr_ref="refs/remotes/upstream/pr-29602"
+          pr_base="d2484697b1f9ce33d1d818ccad859ca3a4d721c6"
 
-          changed = []
-          for path in Path("codex-rs").rglob("*.rs"):
-              text = path.read_text(encoding="utf-8")
-              if "ModelProviderInfo" not in text:
-                  continue
-              updated, count = pattern.subn(
-                  lambda match: match.group(0)
-                  + f"{match.group('indent')}namespace_tools: None,\n",
-                  text,
-              )
-              duplicate_pattern = re.compile(r"(?m)^(?P<indent>[ \t]*)namespace_tools: None,\n"
-                  r"(?P<between>(?:(?P=indent)(?!namespace_tools:)[^\n]*\n){0,32})"
-                  r"(?P=indent)namespace_tools: (?P<explicit>Some\((?:true|false)\)),\n"
-              )
-              updated, duplicate_count = duplicate_pattern.subn(
-                  lambda match: (
-                      match.group("between")
-                      + f"{match.group('indent')}namespace_tools: "
-                      + f"{match.group('explicit')},\n"
-                  ),
-                  updated,
-              )
-              if count or duplicate_count:
-                  path.write_text(updated, encoding="utf-8")
-                  changed.append((str(path), count))
+          git diff --binary "${pr_base}" "${pr_ref}" \
+            > /tmp/pr-29602.patch
 
-          if not changed:
-              raise SystemExit("expected at least one remaining ModelProviderInfo literal")
+          test -s /tmp/pr-29602.patch
+          git apply --3way /tmp/pr-29602.patch
 
-          print("Updated explicit ModelProviderInfo literals:")
-          for path, count in changed:
-              print(f"  {path}: {count}")
-          PY
+      # - name: Fill remaining explicit ModelProviderInfo literals
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     python3 - <<'PY'
+      #     from pathlib import Path
+      #     import re
+
+      #     pattern = re.compile(
+      #         r"(?m)^(?P<indent>[ \t]*)supports_websockets:\s*(?:true|false),\n"
+      #         r"(?![ \t]*namespace_tools:)"
+      #     )
+
+      #     changed = []
+      #     for path in Path("codex-rs").rglob("*.rs"):
+      #         text = path.read_text(encoding="utf-8")
+      #         if "ModelProviderInfo" not in text:
+      #             continue
+      #         updated, count = pattern.subn(
+      #             lambda match: match.group(0)
+      #             + f"{match.group('indent')}namespace_tools: None,\n",
+      #             text,
+      #         )
+      #         duplicate_pattern = re.compile(r"(?m)^(?P<indent>[ \t]*)namespace_tools: None,\n"
+      #             r"(?P<between>(?:(?P=indent)(?!namespace_tools:)[^\n]*\n){0,32})"
+      #             r"(?P=indent)namespace_tools: (?P<explicit>Some\((?:true|false)\)),\n"
+      #         )
+      #         updated, duplicate_count = duplicate_pattern.subn(
+      #             lambda match: (
+      #                 match.group("between")
+      #                 + f"{match.group('indent')}namespace_tools: "
+      #                 + f"{match.group('explicit')},\n"
+      #             ),
+      #             updated,
+      #         )
+      #         if count or duplicate_count:
+      #             path.write_text(updated, encoding="utf-8")
+      #             changed.append((str(path), count))
+
+      #     if not changed:
+      #         raise SystemExit("expected at least one remaining ModelProviderInfo literal")
+
+      #     print("Updated explicit ModelProviderInfo literals:")
+      #     for path, count in changed:
+      #         print(f"  {path}: {count}")
+      #     PY
 
       - name: Install build prerequisites
         shell: bash
@@ -162,7 +173,7 @@ jobs:
           just fix -p codex-model-provider-info
           just fix -p codex-model-provider
           just fix -p codex-config
-          just fmt
+          cargo fmt -- --config imports_granularity=Item
 
       - name: Validate and commit
         shell: bash
