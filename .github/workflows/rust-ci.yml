@@ -158,18 +158,10 @@ jobs:
         env:
           RUST_MIN_STACK: "8388608" # 8 MiB
 
-
-
   # --- Gatherer job that you mark as the ONLY required status -----------------
   results:
     name: CI results (required)
-    needs:
-      [
-        changed,
-        general,
-        cargo_shear,
-        argument_comment_lint_package,
-      ]
+    needs: [changed, general, cargo_shear, argument_comment_lint_package]
     if: always()
     runs-on: ubuntu-24.04
     steps:
