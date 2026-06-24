@@ -50,7 +50,11 @@ jobs:
             [[ $f == codex-rs/* || $f == tools/argument-comment-lint/* || $f == justfile ]] && argument_comment_lint=true
             [[ $f == defs.bzl || $f == workspace_root_test_launcher.sh.tpl || $f == workspace_root_test_launcher.bat.tpl ]] && argument_comment_lint=true
             [[ $f == tools/argument-comment-lint/* || $f == .github/workflows/rust-ci.yml || $f == .github/workflows/rust-ci-full.yml ]] && argument_comment_lint_package=true
-            [[ $f == .github/* ]] && workflows=true
+            if [[ $f == .github/workflows/rust-ci.yml \
+               || $f == .github/actions/run-argument-comment-lint/* \
+               || $f == .github/scripts/run-argument-comment-lint-bazel.sh ]]; then
+              workflows=true
+            fi
           done
 
           echo "argument_comment_lint=$argument_comment_lint" >> "$GITHUB_OUTPUT"
@@ -154,50 +158,7 @@ jobs:
         env:
           RUST_MIN_STACK: "8388608" # 8 MiB
 
-  argument_comment_lint_prebuilt:
-    name: Argument comment lint - ${{ matrix.name }}
-    runs-on: ${{ matrix.runs_on || matrix.runner }}
-    timeout-minutes: ${{ matrix.timeout_minutes }}
-    needs: changed
-    environment:
-      name: bazel
-      deployment: false
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Linux
-            runner: ubuntu-24.04
-            timeout_minutes: 30
-            runs_on:
-              group: ${{ github.event.repository.name }}-runners
-              labels: ${{ github.event.repository.name }}-windows-x64
-    steps:
-      - name: Check whether argument comment lint should run
-        id: argument_comment_lint_gate
-        shell: bash
-        env:
-          ARGUMENT_COMMENT_LINT: ${{ needs.changed.outputs.argument_comment_lint }}
-          WORKFLOWS: ${{ needs.changed.outputs.workflows }}
-        run: |
-          if [[ "$ARGUMENT_COMMENT_LINT" == "true" || "$WORKFLOWS" == "true" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
 
-          echo "No argument-comment-lint relevant changes."
-          echo "run=false" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        if: ${{ steps.argument_comment_lint_gate.outputs.run == 'true' }}
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - name: Run argument comment lint on codex-rs via Bazel
-        if: ${{ steps.argument_comment_lint_gate.outputs.run == 'true' }}
-        uses: ./.github/actions/run-argument-comment-lint
-        with:
-          target: ${{ runner.os }}
-          buildbuddy-api-key: ${{ secrets.BUILDBUDDY_API_KEY }}
 
   # --- Gatherer job that you mark as the ONLY required status -----------------
   results:
