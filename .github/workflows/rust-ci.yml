@@ -158,8 +158,6 @@ jobs:
         env:
           RUST_MIN_STACK: "8388608" # 8 MiB
 
-
-
   # --- Gatherer job that you mark as the ONLY required status -----------------
   results:
     name: CI results (required)
