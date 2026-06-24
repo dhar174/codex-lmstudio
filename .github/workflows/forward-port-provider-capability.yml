@@ -8,7 +8,7 @@ on:
       - .github/workflows/forward-port-provider-capability.yml
   pull_request:
     branches:
-      - main
+      - codex/lmstudio-automation
     paths:
       - .github/workflows/forward-port-provider-capability.yml
       - lmstudio-automation/PLAN.md
@@ -162,7 +162,7 @@ jobs:
           just fix -p codex-model-provider-info
           just fix -p codex-model-provider
           just fix -p codex-config
-          just fmt
+          cargo fmt -- --config imports_granularity=Item
 
       - name: Validate and commit
         shell: bash
