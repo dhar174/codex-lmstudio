@@ -1,10 +1,12 @@
 mod auth;
 mod catalog;
+mod error;
 mod mantle;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use codex_api::ApiError;
 use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_login::AuthManager;
@@ -17,6 +19,7 @@ use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::account::AmazonBedrockCredentialSource;
 use codex_protocol::account::ProviderAccount;
+use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result;
 use codex_protocol::openai_models::ModelsResponse;
 
@@ -103,7 +106,7 @@ impl ModelProvider for AmazonBedrockModelProvider {
 
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
-            namespace_tools: true,
+            namespace_tools: self.info.namespace_tools.unwrap_or(true),
             image_generation: false,
             web_search: false,
         }
@@ -142,6 +145,10 @@ impl ModelProvider for AmazonBedrockModelProvider {
         })
     }
 
+    fn map_api_error(&self, error: ApiError) -> CodexErr {
+        error::map_api_error(error)
+    }
+
     fn api_provider(&self) -> ModelProviderFuture<'_, Result<Provider>> {
         Box::pin(AmazonBedrockModelProvider::api_provider(self))
     }
@@ -165,6 +172,10 @@ impl ModelProvider for AmazonBedrockModelProvider {
         ))
     }
 }
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod error_tests;
 
 #[cfg(test)]
 mod tests {
@@ -279,6 +290,15 @@ mod tests {
                 web_search: false,
             }
         );
+    }
+
+    #[test]
+    fn capabilities_namespace_tools_honors_explicit_opt_out() {
+        let mut info = ModelProviderInfo::create_amazon_bedrock_provider(/*aws*/ None);
+        info.namespace_tools = Some(false);
+        let provider = AmazonBedrockModelProvider::new(info, /*auth_manager*/ None);
+
+        assert!(!provider.capabilities().namespace_tools);
     }
 
     #[test]

@@ -4,8 +4,10 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use codex_api::ApiError;
 use codex_api::Provider;
 use codex_api::SharedAuthProvider;
+use codex_api::is_azure_responses_provider;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
@@ -13,6 +15,7 @@ use codex_models_manager::manager::OpenAiModelsManager;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::account::ProviderAccount;
+use codex_protocol::error::CodexErr;
 use codex_protocol::openai_models::ModelsResponse;
 
 use crate::amazon_bedrock::AmazonBedrockModelProvider;
@@ -42,6 +45,13 @@ impl Default for ProviderCapabilities {
     }
 }
 
+fn resolve_namespace_tools(info: &ModelProviderInfo) -> bool {
+    info.namespace_tools.unwrap_or_else(|| {
+        info.requires_openai_auth
+            || is_azure_responses_provider(&info.name, info.base_url.as_deref())
+    })
+}
+
 /// Current app-visible account state for a model provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderAccountState {
@@ -60,10 +70,7 @@ impl fmt::Display for ProviderAccountError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingChatgptAccountDetails => {
-                write!(
-                    f,
-                    "email and plan type are required for chatgpt authentication"
-                )
+                write!(f, "plan type is required for chatgpt authentication")
             }
             Self::UnsupportedBedrockApiKeyAuth => {
                 write!(
@@ -145,6 +152,11 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// Returns the current app-visible account state for this provider.
     fn account_state(&self) -> ProviderAccountResult;
 
+    /// Maps an API client error into the provider's user-facing error representation.
+    fn map_api_error(&self, error: ApiError) -> CodexErr {
+        codex_api::map_api_error(error)
+    }
+
     /// Returns provider configuration adapted for the API client.
     fn api_provider(&self) -> ModelProviderFuture<'_, codex_protocol::error::Result<Provider>> {
         Box::pin(async move {
@@ -218,6 +230,13 @@ impl ModelProvider for ConfiguredModelProvider {
         &self.info
     }
 
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            namespace_tools: resolve_namespace_tools(&self.info),
+            ..ProviderCapabilities::default()
+        }
+    }
+
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.auth_manager.clone()
     }
@@ -261,12 +280,9 @@ impl ModelProvider for ConfiguredModelProvider {
                         let email = auth.get_account_email();
                         let plan_type = auth.account_plan_type();
 
-                        match (email, plan_type) {
-                            (Some(email), Some(plan_type)) => {
-                                Ok(ProviderAccount::Chatgpt { email, plan_type })
-                            }
-                            _ => Err(ProviderAccountError::MissingChatgptAccountDetails),
-                        }
+                        plan_type
+                            .map(|plan_type| ProviderAccount::Chatgpt { email, plan_type })
+                            .ok_or(ProviderAccountError::MissingChatgptAccountDetails)
                     }
                 })
                 .transpose()?
@@ -313,6 +329,7 @@ mod tests {
     use codex_model_provider_info::ModelProviderAwsAuthInfo;
     use codex_model_provider_info::WireApi;
     use codex_models_manager::manager::RefreshStrategy;
+    use codex_protocol::account::PlanType;
     use codex_protocol::config_types::ModelProviderAuthInfo;
     use codex_protocol::openai_models::ModelInfo;
     use codex_protocol::openai_models::ModelsResponse;
@@ -367,6 +384,7 @@ mod tests {
             websocket_connect_timeout_ms: None,
             requires_openai_auth: false,
             supports_websockets: false,
+            namespace_tools: None,
         }
     }
 
@@ -412,6 +430,38 @@ mod tests {
         );
 
         assert_eq!(provider.capabilities(), ProviderCapabilities::default());
+    }
+
+    #[test]
+    fn configured_non_openai_provider_flattens_namespace_tools() {
+        let provider = create_model_provider(
+            provider_for("https://example.test/v1".to_string()),
+            /*auth_manager*/ None,
+        );
+
+        assert!(!provider.capabilities().namespace_tools);
+    }
+
+    #[test]
+    fn configured_azure_provider_keeps_namespace_tools() {
+        let mut azure = provider_for("https://xxxxx.openai.azure.com/openai".to_string());
+        azure.name = "azure".to_string();
+        let provider = create_model_provider(azure, /*auth_manager*/ None);
+
+        assert!(provider.capabilities().namespace_tools);
+    }
+
+    #[test]
+    fn configured_provider_namespace_tools_honors_explicit_override() {
+        let mut non_openai = provider_for("https://example.test/v1".to_string());
+        non_openai.namespace_tools = Some(true);
+        let provider = create_model_provider(non_openai, /*auth_manager*/ None);
+        assert!(provider.capabilities().namespace_tools);
+
+        let mut openai = ModelProviderInfo::create_openai_provider(/*base_url*/ None);
+        openai.namespace_tools = Some(false);
+        let provider = create_model_provider(openai, /*auth_manager*/ None);
+        assert!(!provider.capabilities().namespace_tools);
     }
 
     #[test]
@@ -518,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_provider_rejects_chatgpt_account_state_without_email() {
+    fn openai_provider_returns_chatgpt_account_state_without_email() {
         let provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             Some(AuthManager::from_auth_for_testing(
@@ -528,7 +578,13 @@ mod tests {
 
         assert_eq!(
             provider.account_state(),
-            Err(ProviderAccountError::MissingChatgptAccountDetails)
+            Ok(ProviderAccountState {
+                account: Some(ProviderAccount::Chatgpt {
+                    email: None,
+                    plan_type: PlanType::Unknown,
+                }),
+                requires_openai_auth: true,
+            })
         );
     }
 

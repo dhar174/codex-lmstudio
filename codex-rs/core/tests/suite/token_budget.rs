@@ -4,6 +4,8 @@ use codex_config::types::McpServerTransportConfig;
 use codex_core::config::TokenBudgetConfig;
 use codex_features::Feature;
 use codex_model_provider_info::built_in_model_providers;
+use codex_protocol::protocol::CONTEXT_WINDOW_CLOSE_TAG;
+use codex_protocol::protocol::CONTEXT_WINDOW_OPEN_TAG;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use core_test_support::PathBufExt;
@@ -34,10 +36,11 @@ use std::time::Duration;
 const CONFIGURED_CONTEXT_WINDOW: i64 = 128_000;
 
 fn token_budget_contexts(request: &ResponsesRequest) -> Vec<String> {
+    let context_window_prefix = format!("{CONTEXT_WINDOW_OPEN_TAG}\nThread id: ");
     request
         .message_input_texts("developer")
         .into_iter()
-        .filter(|text| text.starts_with("Thread id "))
+        .filter(|text| text.starts_with(&context_window_prefix))
         .collect()
 }
 
@@ -47,7 +50,7 @@ fn token_budget_window_ids(
 ) -> (String, Option<String>, String) {
     let captures = assert_regex_match(
         &format!(
-            r"^Thread id {thread_id}\.\nFirst context window id: ([0-9a-f-]{{36}})\nCurrent context window id: ([0-9a-f-]{{36}})(?:\nPrevious context window id: ([0-9a-f-]{{36}}))?$"
+            r"^{CONTEXT_WINDOW_OPEN_TAG}\nThread id: {thread_id}\nFirst context window id: ([0-9a-f-]{{36}})\nCurrent context window id: ([0-9a-f-]{{36}})(?:\nPrevious context window id: ([0-9a-f-]{{36}}))?\n{CONTEXT_WINDOW_CLOSE_TAG}$"
         ),
         text,
     );
@@ -191,7 +194,7 @@ async fn token_budget_context_injects_plain_thread_hint_text() -> Result<()> {
     assert_eq!(token_budgets.len(), 1);
     let captures = assert_regex_match(
         &format!(
-            r"^Thread id {thread_id}\.\nFirst context window id: ([0-9a-f-]{{36}})\nCurrent context window id: ([0-9a-f-]{{36}})\nmanual history hint for thread {thread_id}\nunstructured notes/thread_hint fixture result$"
+            r"^{CONTEXT_WINDOW_OPEN_TAG}\nThread id: {thread_id}\nFirst context window id: ([0-9a-f-]{{36}})\nCurrent context window id: ([0-9a-f-]{{36}})\nmanual history hint for thread {thread_id}\nunstructured notes/thread_hint fixture result\n{CONTEXT_WINDOW_CLOSE_TAG}$"
         ),
         &token_budgets[0],
     );
@@ -545,6 +548,54 @@ async fn new_context_tool_starts_new_window_before_follow_up() -> Result<()> {
     insta::assert_snapshot!(
         "token_budget_new_context_window_tool_full_context",
         snapshot
+    );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn auto_compaction_feature_disabled_hides_new_context_tool() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![sse(vec![
+            ev_response_created("resp-1"),
+            ev_completed("resp-1"),
+        ])],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config.model_context_window = Some(CONFIGURED_CONTEXT_WINDOW);
+            config
+                .features
+                .enable(Feature::TokenBudget)
+                .expect("test config should allow token budget");
+            config
+                .features
+                .disable(Feature::AutoCompaction)
+                .expect("test config should allow disabling auto-compaction");
+        })
+        .build(&server)
+        .await?;
+
+    test.submit_turn("preserve the current context window")
+        .await?;
+
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 1);
+    let tool_names = tool_names(&requests[0]);
+    assert!(
+        tool_names
+            .iter()
+            .any(|name| name == "get_context_remaining"),
+        "token budget should continue to expose get_context_remaining"
+    );
+    assert!(
+        !tool_names.iter().any(|name| name == "new_context"),
+        "disabled auto-compaction should hide new_context"
     );
 
     Ok(())

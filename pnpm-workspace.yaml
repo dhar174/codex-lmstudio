@@ -14,4 +14,4 @@ strictDepBuilds: true
 trustPolicy: no-downgrade
 trustPolicyIgnoreAfter: 10080
 trustPolicyExclude: []
-allowBuilds: {}
+allowBuilds: { esbuild: true }
