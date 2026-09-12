@@ -10,7 +10,7 @@ jobs:
   gather-labels:
     name: Generate label suggestions
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
-    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-label'))
+    if: github.repository == 'dhar174/codex-lmstudio' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-label'))
     runs-on: ubuntu-latest
     environment: issue-triage
     permissions:
@@ -19,7 +19,7 @@ jobs:
       codex_output: ${{ steps.codex.outputs.final-message }}
     steps:
       - id: codex
-        uses: openai/codex-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
+        uses: dhar174/codex-lmstudio-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
         with:
           openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
           allow-users: "*"
