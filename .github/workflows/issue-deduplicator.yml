@@ -10,7 +10,7 @@ jobs:
   gather-duplicates-all:
     name: Identify potential duplicates (all issues)
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
-    if: github.repository == 'openai/codex' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-deduplicate'))
+    if: github.repository == 'dhar174/codex-lmstudio' && (github.event.action == 'opened' || (github.event.action == 'labeled' && github.event.label.name == 'codex-deduplicate'))
     runs-on: ubuntu-latest
     environment: issue-triage
     permissions:
@@ -58,7 +58,7 @@ jobs:
       # .github/prompts/issue-deduplicator.txt file is obsolete and removed.
       - id: codex-all
         name: Find duplicates (pass 1, all issues)
-        uses: openai/codex-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
+        uses: dhar174/codex-lmstudio-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
         with:
           openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
           allow-users: "*"
@@ -202,7 +202,7 @@ jobs:
 
       - id: codex-open
         name: Find duplicates (pass 2, open issues)
-        uses: openai/codex-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
+        uses: dhar174/codex-lmstudio-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
         with:
           openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
           allow-users: "*"
@@ -402,7 +402,7 @@ jobs:
               '',
               ...filteredIssues.map((value) => `- #${String(value)}`),
               '',
-              '*Powered by [Codex Action](https://github.com/openai/codex-action)*'];
+              '*Powered by [Codex Action](https://github.com/dhar174/codex-lmstudio-action)*'];
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,

@@ -7,7 +7,7 @@ Maintain two independent Codex installations:
 - `codex`: the unmodified official installation using ChatGPT Plus/OpenAI and `~/.codex`
 - `codex-lmstudio`: a separately installed fork build using LM Studio, its own `CODEX_HOME`, local MCP servers, and Qdrant
 
-The fork must track `openai/codex:main`, rebuild safely, publish verified Linux artifacts, and never disrupt the official installation.
+The fork's own maintained branch history is the authoritative product baseline. It must rebuild safely, publish verified Linux artifacts, and never disrupt the official installation. See `FORK_POLICY.md`, `HOOKS.md`, and `MEMORY4AI.md` for the current architecture.
 
 ## Environment
 
@@ -46,11 +46,8 @@ The exact upstream PR head is preserved as a vendor reference, but it will not b
 
 The implementation strategy is therefore:
 
-1. Keep the vendor branch unchanged for provenance and future upstream comparisons.
-2. Forward-port the PR's behavior onto current `main` using current Codex abstractions.
-3. Reuse upstream test cases and semantics where they remain valid.
-4. Add fixes for unresolved review findings before publishing a build.
-5. Retire the forward-port automatically when equivalent code lands upstream.
+1. Keep imported/upstream branches or PRs only as historical/provenance references where useful.
+2. Treat future upstream reuse as deliberate, issue-scoped maintenance rather than a required workflow.
 
 Unresolved upstream review findings that must be addressed:
 
@@ -163,23 +160,18 @@ The launcher must set a separate `CODEX_HOME` and must never modify the official
 
 Add GitHub Actions workflows for:
 
-- [ ] scheduled and manual upstream-change detection
-- [ ] safe synchronization with `openai/codex:main`
-- [ ] monitoring PR #28271 and equivalent upstream implementations
-- [ ] compatibility-patch verification and retirement detection
 - [ ] focused Rust tests and formatting checks
 - [ ] Linux x86_64 release builds
 - [ ] SHA-256 checksums and build metadata
 - [ ] rolling prerelease publication as `lmstudio-latest`
 - [ ] artifact publication only after successful validation
-- [ ] a deduplicated failure report when upstream breaks the integration
 
 Repository rules must be respected. Workflows must not assume arbitrary branch creation or unsafe force pushes are allowed.
 
 ## Phase 6: Documentation and validation
 
 - [ ] Add operator-focused `lmstudio-automation/README.md`.
-- [ ] Document architecture, install, configuration, updates, rollback, uninstall, Qdrant, LM Studio, Devstral, troubleshooting, and patch retirement.
+- [ ] Document architecture, install, configuration, updates, rollback, uninstall, Qdrant, LM Studio, Devstral, and troubleshooting.
 - [ ] Run `just fmt`.
 - [ ] Run affected crate tests with `just test -p ...`.
 - [ ] Run applicable scoped `just fix -p ...`.
@@ -208,5 +200,4 @@ Repository rules must be respected. Workflows must not assume arbitrary branch c
 - LM Studio receives callable MCP functions when namespace tools are unsupported.
 - Returned calls dispatch to the correct MCP server and tool.
 - Qdrant `qdrant-store` and `qdrant-find` are visible and callable through Codex with a compatible local model.
-- Upstream changes produce a verified rebuild or a clear actionable failure without breaking the last working installation.
 - The work is delivered through a reviewed pull request to `main`; nothing merges automatically.

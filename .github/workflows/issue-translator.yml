@@ -9,7 +9,7 @@ jobs:
   translate-issue:
     name: Translate non-English issue
     # Prevent runs on forks (requires OpenAI API key, wastes Actions minutes)
-    if: github.repository == 'openai/codex'
+    if: github.repository == 'dhar174/codex-lmstudio'
     runs-on: ubuntu-latest
     environment: issue-triage
     permissions:
@@ -21,7 +21,7 @@ jobs:
         run: jq '.issue | {title, body}' "$GITHUB_EVENT_PATH" > codex-current-issue.json
 
       - id: codex
-        uses: openai/codex-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
+        uses: dhar174/codex-lmstudio-action@5c3f4ccdb2b8790f73d6b21751ac00e602aa0c02 # v1.7
         with:
           openai-api-key: ${{ secrets.CODEX_OPENAI_API_KEY }}
           allow-users: "*"
