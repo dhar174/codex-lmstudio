@@ -1,0 +1,190 @@
+name: Forward-port provider namespace capability
+
+on:
+  push:
+    branches:
+      - codex/lmstudio-automation
+    paths:
+      - .github/workflows/forward-port-provider-capability.yml
+  pull_request:
+    branches:
+      - codex/lmstudio-automation
+    paths:
+      - .github/workflows/forward-port-provider-capability.yml
+      - lmstudio-automation/PLAN.md
+
+permissions:
+  contents: write
+
+concurrency:
+  group: forward-port-provider-capability
+  cancel-in-progress: false
+
+jobs:
+  forward-port:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out integration branch
+        uses: actions/checkout@v4
+        with:
+          ref: codex/lmstudio-automation
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch pinned upstream PR 29602
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_ref="refs/remotes/upstream/pr-29602"
+          expected_sha="42961ed49bb490ff33f93e4ebbc091168af10173"
+
+          git fetch --no-tags https://github.com/openai/codex.git \
+            "refs/pull/29602/head:${pr_ref}"
+
+          actual_sha="$(git rev-parse "${pr_ref}")"
+          if [[ "${actual_sha}" != "${expected_sha}" ]]; then
+            echo "PR 29602 changed since this workflow was reviewed." >&2
+            echo "Expected: ${expected_sha}" >&2
+            echo "Actual:   ${actual_sha}" >&2
+            exit 1
+          fi
+
+      - name: Apply upstream PR 29602
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pr_ref="refs/remotes/upstream/pr-29602"
+          pr_base="d2484697b1f9ce33d1d818ccad859ca3a4d721c6"
+
+          git diff --binary "${pr_base}" "${pr_ref}" \
+            > /tmp/pr-29602.patch
+
+          test -s /tmp/pr-29602.patch
+          git apply --3way /tmp/pr-29602.patch
+
+      # - name: Fill remaining explicit ModelProviderInfo literals
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     python3 - <<'PY'
+      #     from pathlib import Path
+      #     import re
+
+      #     pattern = re.compile(
+      #         r"(?m)^(?P<indent>[ \t]*)supports_websockets:\s*(?:true|false),\n"
+      #         r"(?![ \t]*namespace_tools:)"
+      #     )
+
+      #     changed = []
+      #     for path in Path("codex-rs").rglob("*.rs"):
+      #         text = path.read_text(encoding="utf-8")
+      #         if "ModelProviderInfo" not in text:
+      #             continue
+      #         updated, count = pattern.subn(
+      #             lambda match: match.group(0)
+      #             + f"{match.group('indent')}namespace_tools: None,\n",
+      #             text,
+      #         )
+      #         duplicate_pattern = re.compile(r"(?m)^(?P<indent>[ \t]*)namespace_tools: None,\n"
+      #             r"(?P<between>(?:(?P=indent)(?!namespace_tools:)[^\n]*\n){0,32})"
+      #             r"(?P=indent)namespace_tools: (?P<explicit>Some\((?:true|false)\)),\n"
+      #         )
+      #         updated, duplicate_count = duplicate_pattern.subn(
+      #             lambda match: (
+      #                 match.group("between")
+      #                 + f"{match.group('indent')}namespace_tools: "
+      #                 + f"{match.group('explicit')},\n"
+      #             ),
+      #             updated,
+      #         )
+      #         if count or duplicate_count:
+      #             path.write_text(updated, encoding="utf-8")
+      #             changed.append((str(path), count))
+
+      #     if not changed:
+      #         raise SystemExit("expected at least one remaining ModelProviderInfo literal")
+
+      #     print("Updated explicit ModelProviderInfo literals:")
+      #     for path, count in changed:
+      #         print(f"  {path}: {count}")
+      #     PY
+
+      - name: Install build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+          command -v just >/dev/null 2>&1 || cargo install just --locked
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.3"
+
+      - name: Install DotSlash
+        uses: facebook/install-dotslash@1e4e7b3e07eaca387acb98f1d4720e0bee8dbb6a # v2
+
+      - name: Install nextest
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+
+      - name: Regenerate configuration schema
+        working-directory: codex-rs
+        shell: bash
+        run: just write-config-schema
+
+      - name: Test model-provider-info
+        working-directory: codex-rs
+        shell: bash
+        run: just test -p codex-model-provider-info
+
+      - name: Test model-provider
+        working-directory: codex-rs
+        shell: bash
+        run: just test -p codex-model-provider
+
+      - name: Test config
+        working-directory: codex-rs
+        shell: bash
+        run: just test -p codex-config
+
+      - name: Check dependent crates
+        working-directory: codex-rs
+        shell: bash
+        run: cargo check -p codex-core -p codex-app-server
+
+      - name: Apply scoped fixes and formatting
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          just fix -p codex-model-provider-info
+          just fix -p codex-model-provider
+          just fix -p codex-config
+          cargo fmt -- --config imports_granularity=Item
+
+      - name: Validate and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git status --short
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No provider capability changes were produced."
+            exit 1
+          fi
+          git commit -m "feat: add configurable namespace tool capability [skip ci]"
+          git push origin HEAD:codex/lmstudio-automation
