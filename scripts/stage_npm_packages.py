@@ -152,12 +152,18 @@ def resolve_release_workflow(version: str) -> dict:
             "gh",
             "run",
             "list",
+            "--repo",
+            GITHUB_REPO,
             "--branch",
             f"rust-v{version}",
-            "--json",
-            "workflowName,url,headSha",
             "--workflow",
             WORKFLOW_NAME,
+            "--status",
+            "success",
+            "--limit",
+            "1",
+            "--json",
+            "workflowName,url,headSha",
             "--jq",
             "first(.[])",
         ],
@@ -167,7 +173,7 @@ def resolve_release_workflow(version: str) -> dict:
     workflow = json.loads(stdout or "null")
     if not workflow:
         raise RuntimeError(
-            f"Unable to find rust-release workflow for version {version}."
+            f"Unable to find a successful rust-release workflow for version {version} in {GITHUB_REPO}."
         )
     return workflow
 
@@ -293,20 +299,26 @@ def download_artifacts(
             f"  downloading {artifact.name} ({format_bytes(artifact.size_in_bytes)})",
             flush=True,
         )
-        subprocess.check_call(
-            [
-                "gh",
-                "run",
-                "download",
-                "--name",
-                artifact.name,
-                "--dir",
-                str(artifact_dir),
-                "--repo",
-                GITHUB_REPO,
-                workflow_id,
-            ]
-        )
+        try:
+            subprocess.check_call(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    "--name",
+                    artifact.name,
+                    "--dir",
+                    str(artifact_dir),
+                    "--repo",
+                    GITHUB_REPO,
+                    workflow_id,
+                ]
+            )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Failed to download artifact {artifact.name!r} from {GITHUB_REPO} run {workflow_id}; "
+                "the artifact may have expired or is unavailable."
+            ) from exc
 
 
 def install_codex_package_archives(
